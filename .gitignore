@@ -31,3 +31,6 @@ Thumbs.db
 
 # uv (no longer used)
 uv.lock
+
+# Local test scripts
+tests/
