@@ -1,0 +1,33 @@
+# Keys — never commit these
+.env
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Cloned repos (used by repo_analyzer subagent)
+cloned_repos/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# uv (no longer used)
+uv.lock
