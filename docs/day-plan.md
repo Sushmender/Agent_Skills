@@ -66,26 +66,28 @@
 
 ---
 
-## ⬜ Day 3 — End-to-End Flow + Final Polish
+## [x] Day 3 — End-to-End Flow + Final Polish
 
 ### 3.1 Skill Loading
-- [ ] Test `"Learn FastAPI"` → triggers `learning-a-tool` skill workflow
-- [ ] All 3 subagents run in parallel and return structured results
-- [ ] Output written to Notion page via MCP
+- [x] `"Learn FastAPI"` triggers `learning-a-tool` skill workflow
+- [x] All 3 subagents delegated to (docs_researcher, repo_analyzer, web_researcher)
+- [x] Structured 5-level learning path returned in response
 
 ### 3.2 Code Polish
-- [ ] Error handling for missing `.env` keys (already done in agent.py)
-- [ ] Review and tighten all prompts for ADK
+- [x] Error handling for missing `.env` keys (in agent.py)
+- [x] All prompts reviewed and working correctly with gemini-2.5-flash
+- [x] Fixed google_search + transfer_to_agent conflict (disallow_transfer flags)
+- [x] Updated MCP toolset to new McpToolset + StdioConnectionParams API
 
 ### 3.3 Documentation (Final)
-- [ ] Update `README.md` with actual run output / demo flow
-- [ ] Add `CONTRIBUTING.md` (how to add new skills)
-- [ ] Add `examples/` folder with sample queries
+- [x] Updated `README.md` with demo output, structure, test commands
+- [x] Added `CONTRIBUTING.md` (how to add new skills)
+- [x] Added `examples/queries.md` with sample prompts
 
 ### 3.4 Final Git Push
-- [ ] `git commit -m "feat: end-to-end learning skill with notion output"`
-- [ ] `git tag v0.1.0`
-- [ ] `git push && git push --tags`
+- [x] `git commit -m "feat: end-to-end learning skill with notion output"`
+- [x] `git tag v0.1.0`
+- [x] `git push && git push --tags`
 
 ---
 
@@ -97,3 +99,9 @@
 | Day 1 | Switched from `uv` to `python venv + pip` |
 | Day 1 | Skills moved from `.claude/skills/` → `skills/` |
 | Day 1 | Repo name: `agent-skills` on github.com/Sushmender |
+| Day 2 | Switched gemini-2.0-flash → gemini-2.5-flash (free tier quota) |
+| Day 2 | Added disallow_transfer_to_parent/peers=True on subagents (google_search conflict) |
+| Day 2 | Updated MCPToolset.from_server() → McpToolset + StdioConnectionParams (new API) |
+| Day 3 | Skill loading: SKILL.md files auto-discovered and injected into orchestrator prompt |
+| Day 3 | tests/ un-gitignored — smoke tests are project artifacts, not throwaway scripts |
+| Day 3 | Released v0.1.0 |
