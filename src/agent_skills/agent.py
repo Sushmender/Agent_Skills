@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
-from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset, StdioServerParameters
+from google.adk.tools.mcp_tool.mcp_toolset import McpToolset, StdioConnectionParams
+from google.adk.tools.mcp_tool.mcp_session_manager import StdioServerParameters
 from google.genai import types
 
 from agent_skills.subagents import create_subagents
@@ -29,48 +30,78 @@ def load_prompt(filename: str) -> str:
         return f.read().strip()
 
 
+def load_skills() -> str:
+    """
+    Scan skills/ directory and return all SKILL.md contents concatenated
+    into a section that is injected into the orchestrator's system prompt.
+    """
+    skills_section = ""
+    if not os.path.isdir(SKILLS_DIR):
+        return skills_section
+
+    for skill_dir in sorted(os.listdir(SKILLS_DIR)):
+        skill_path = os.path.join(SKILLS_DIR, skill_dir, "SKILL.md")
+        if os.path.isfile(skill_path):
+            with open(skill_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            skills_section += f"\n\n---\n## Skill: {skill_dir}\n\n{content}"
+
+    if skills_section:
+        skills_section = "## Available Skills" + skills_section
+
+    return skills_section
+
+
 async def main():
     if not GEMINI_API_KEY:
-        print("❌  GEMINI_API_KEY not found. Please add it to your .env file.")
+        print("GEMINI_API_KEY not found. Please add it to your .env file.")
         return
 
-    main_agent_prompt = load_prompt("main_agent.md")
+    # Build orchestrator prompt: base prompt + all skills injected
+    base_prompt = load_prompt("main_agent.md")
+    skills_context = load_skills()
+    main_agent_prompt = base_prompt
+    if skills_context:
+        main_agent_prompt += "\n\n" + skills_context
+
     subagents = create_subagents(PROMPTS_DIR)
 
     # Connect to Notion MCP server (requires Node.js + npx installed)
-    notion_tools = []
-    exit_stack = None
+    notion_toolset = None
 
     if NOTION_TOKEN:
         try:
-            notion_tools, exit_stack = await MCPToolset.from_server(
-                connection_params=StdioServerParameters(
-                    command="npx",
-                    args=["-y", "@notionhq/notion-mcp-server"],
-                    env={
-                        "OPENAPI_MCP_HEADERS": (
-                            f'{{"Authorization": "Bearer {NOTION_TOKEN}", '
-                            f'"Notion-Version": "2022-06-28"}}'
-                        )
-                    },
+            notion_toolset = McpToolset(
+                connection_params=StdioConnectionParams(
+                    server_params=StdioServerParameters(
+                        command="npx",
+                        args=["-y", "@notionhq/notion-mcp-server"],
+                        env={
+                            "OPENAPI_MCP_HEADERS": (
+                                f'{{"Authorization": "Bearer {NOTION_TOKEN}", '
+                                f'"Notion-Version": "2022-06-28"}}'
+                            )
+                        },
+                    ),
+                    timeout=60.0,
                 )
             )
-            print("✅  Notion MCP server connected.\n")
+            print("Notion MCP toolset created.\n")
         except Exception as e:
-            print(f"⚠️   Notion MCP failed to connect: {e}")
+            print(f"Warning: Notion MCP setup failed: {e}")
             print("    Continuing without Notion tools.\n")
     else:
-        print("⚠️   NOTION_TOKEN not set. Skipping Notion MCP.\n")
+        print("Warning: NOTION_TOKEN not set. Skipping Notion MCP.\n")
 
     try:
         # Main orchestrator agent
         orchestrator = LlmAgent(
             name="orchestrator",
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             description="Research orchestrator that delegates tasks to specialized subagents.",
             instruction=main_agent_prompt,
             sub_agents=subagents,
-            tools=notion_tools,
+            tools=[notion_toolset] if notion_toolset else [],
         )
 
         session_service = InMemorySessionService()
@@ -82,8 +113,15 @@ async def main():
             session_service=session_service,
         )
 
-        print("🤖  Agent Skills — Powered by Gemini ADK")
-        print("    Type 'exit' to quit\n")
+        # InMemorySessionService requires explicit session creation
+        await session_service.create_session(
+            app_name="agent_skills",
+            user_id="user",
+            session_id=session_id,
+        )
+
+        print("Agent Skills -- Powered by Gemini ADK")
+        print("Type 'exit' to quit\n")
 
         while True:
             try:
@@ -109,12 +147,6 @@ async def main():
                 new_message=content,
             ):
                 display_event(event)
-
-    finally:
-        # Clean up MCP server connection
-        if exit_stack:
-            await exit_stack.aclose()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

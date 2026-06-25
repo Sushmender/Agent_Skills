@@ -32,5 +32,5 @@ Thumbs.db
 # uv (no longer used)
 uv.lock
 
-# Local test scripts
-tests/
+# Generated learning paths (output from the skill)
+learning-*/

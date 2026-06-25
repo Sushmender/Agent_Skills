@@ -45,20 +45,20 @@
 
 ---
 
-## ⬜ Day 2 — Notion MCP + Smoke Testing
+## [x] Day 2 — Notion MCP + Smoke Testing
 
 ### 2.1 Environment Setup
-- [ ] `python -m venv .venv` + activate
-- [ ] `pip install -r requirements.txt`
-- [ ] Paste `GEMINI_API_KEY` into `.env`
-- [ ] Create Notion integration → paste `NOTION_TOKEN`
-- [ ] Share Notion pages with the integration
+- [x] `python -m venv .venv` + activate
+- [x] `pip install -r requirements.txt` (added `mcp>=1.0.0`)
+- [x] `GEMINI_API_KEY` confirmed working in `.env`
+- [x] `NOTION_TOKEN` confirmed working in `.env`
+- [x] Notion integration connected via MCP
 
 ### 2.2 Validation
-- [ ] `python src/agent_skills/agent.py` starts without errors
-- [ ] Notion MCP connects (✅ message in terminal)
-- [ ] Ask "What is FastAPI?" → 3 subagents spawn and respond
-- [ ] Test Notion write: "Save this to Notion" → page created
+- [x] `test_gemini.py` passes — Gemini API (gemini-2.5-flash) works
+- [x] `test_agent.py` passes — ADK orchestrator + 3 subagents spawn and respond
+- [x] Asked "What is FastAPI?" — `web_researcher` delegated and returned full response
+- [x] `test_notion.py` passes — Notion MCP connects, `API-post-page` tool called successfully
 
 ### 2.3 Git Push
 - [ ] `git commit -m "feat: notion mcp and subagent smoke tests"`
