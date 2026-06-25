@@ -148,5 +148,13 @@ async def main():
             ):
                 display_event(event)
 
+    except Exception as e:
+        print(f"\nError: {e}")
+    finally:
+        # Clean up MCP toolset (terminates the npx process)
+        if notion_toolset:
+            await notion_toolset.close()
+
+
 if __name__ == "__main__":
     asyncio.run(main())
