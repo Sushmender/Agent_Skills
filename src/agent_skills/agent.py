@@ -17,6 +17,15 @@ from agent_skills.utils import display_event
 
 load_dotenv()
 
+class UnderscoreMcpToolset(McpToolset):
+    async def get_tools(self, readonly_context=None):
+        tools = await super().get_tools(readonly_context)
+        for t in tools:
+            if "-" in t.name:
+                t.name = t.name.replace("-", "_")
+        return tools
+
+
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
@@ -74,7 +83,7 @@ async def main():
 
     if NOTION_TOKEN:
         try:
-            notion_toolset = McpToolset(
+            notion_toolset = UnderscoreMcpToolset(
                 connection_params=StdioConnectionParams(
                     server_params=StdioServerParameters(
                         command="npx",

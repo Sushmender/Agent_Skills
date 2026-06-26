@@ -34,7 +34,7 @@ When spawning a subagent, always include:
 - **Extraction instructions**: What specific information to find
 - **Output format**: How to structure the response
 
-Launch subagents in parallel when their tasks are independent.
+Launch subagents sequentially. Do NOT invoke multiple subagents in a single turn. Wait for each subagent to finish and return results before calling the next one. This is critical to avoid rate limiting.
 
 ## Synthesis
 

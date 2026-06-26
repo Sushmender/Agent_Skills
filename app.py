@@ -3,6 +3,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 import asyncio
 import os
+import re
 import sys
 import uuid
 import streamlit as st
@@ -21,303 +22,1090 @@ from google.genai import types
 from agent_skills.agent import load_prompt, load_skills
 from agent_skills.subagents import create_subagents
 
-# Load local environment variables
 load_dotenv()
 
-# Streamlit Page Configuration
+class UnderscoreMcpToolset(McpToolset):
+    async def get_tools(self, readonly_context=None):
+        tools = await super().get_tools(readonly_context)
+        for t in tools:
+            if "-" in t.name:
+                t.name = t.name.replace("-", "_")
+        return tools
+
+
+# ── Page Config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Agent Skills Orchestrator",
+    page_title="Agent Skills",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Custom Sleek UI Styling
+# ── Design System CSS ─────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
-    
-    html, body, [class*="css"] {
-        font-family: 'Outfit', sans-serif;
-    }
-    
-    .main-title {
-        font-size: 2.8rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #FF4B4B, #4776E6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.2rem;
-    }
-    
-    .subtitle {
-        font-size: 1.1rem;
-        color: #888888;
-        margin-bottom: 2rem;
-    }
-    
-    .status-log {
-        background-color: #1e1e1e;
-        border-radius: 8px;
-        padding: 10px;
-        font-family: 'Courier New', Courier, monospace;
-        font-size: 0.9rem;
-        color: #d4d4d4;
-        max-height: 300px;
-        overflow-y: auto;
-        border-left: 4px solid #4776E6;
-        margin-bottom: 15px;
-    }
-    
-    .metric-card {
-        background-color: #262730;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #444;
-        text-align: center;
-    }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap');
+
+  html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif !important;
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: #1a1d27; }
+  ::-webkit-scrollbar-thumb { background: #6366f1; border-radius: 3px; }
+
+  /* ── Hero ── */
+  .hero-wrapper {
+    text-align: center;
+    padding: 2rem 0 1rem;
+  }
+  .hero-icon {
+    font-size: 3.2rem;
+    display: block;
+    margin-bottom: 0.4rem;
+    filter: drop-shadow(0 0 22px rgba(99,102,241,0.7));
+    animation: float 3s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50%       { transform: translateY(-9px); }
+  }
+  .hero-title {
+    font-size: 2.9rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6, #06b6d4, #6366f1);
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradient-shift 5s ease infinite;
+    margin: 0;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+  }
+  @keyframes gradient-shift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .hero-subtitle {
+    font-size: 0.95rem;
+    color: #64748b;
+    margin-top: 0.5rem;
+    letter-spacing: 0.4px;
+    font-weight: 400;
+  }
+  .hero-divider {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #6366f1, #8b5cf6, #06b6d4, transparent);
+    margin: 1.2rem auto 0;
+    border: none;
+    border-radius: 2px;
+    max-width: 600px;
+  }
+
+  /* ── Agent Cards ── */
+  .agent-card {
+    border-radius: 14px;
+    padding: 1rem 1.1rem;
+    transition: all 0.35s ease;
+    min-height: 140px;
+  }
+  .agent-card-standby {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .agent-card-running {
+    background: rgba(99,102,241,0.1);
+    border: 1px solid #6366f1;
+    animation: pulse-glow 1.6s ease-in-out infinite;
+  }
+  .agent-card-done {
+    background: rgba(16,185,129,0.07);
+    border: 1px solid rgba(16,185,129,0.4);
+  }
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 12px rgba(99,102,241,0.25); }
+    50%       { box-shadow: 0 0 28px rgba(99,102,241,0.65); }
+  }
+  .agent-name {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    margin: 0 0 0.2rem;
+  }
+  .agent-role {
+    font-size: 0.73rem;
+    color: #475569;
+    margin-bottom: 0.5rem;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+  }
+  .badge-standby { background: rgba(71,85,105,0.3);   color: #94a3b8; }
+  .badge-running { background: rgba(99,102,241,0.25); color: #a5b4fc; }
+  .badge-done    { background: rgba(16,185,129,0.2);  color: #6ee7b7; }
+  .agent-log-preview {
+    font-size: 0.7rem;
+    color: #64748b;
+    margin-top: 0.55rem;
+    font-family: 'Courier New', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Phase Bar ── */
+  .phase-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 1rem 0;
+  }
+  .phase-step {
+    flex: 1;
+    text-align: center;
+    padding: 0.45rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    transition: all 0.4s;
+  }
+  .phase-inactive { background: rgba(255,255,255,0.03); color: #334155; border: 1px solid rgba(255,255,255,0.05); }
+  .phase-active   { background: rgba(99,102,241,0.2);  color: #a5b4fc;  border: 1px solid rgba(99,102,241,0.4); }
+  .phase-done     { background: rgba(16,185,129,0.12); color: #6ee7b7;  border: 1px solid rgba(16,185,129,0.3); }
+  .phase-arrow    { color: #1e293b; font-size: 1.1rem; padding: 0 3px; flex-shrink: 0; }
+
+  /* ── Terminal Log ── */
+  .terminal-log {
+    background: #080a0f;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.78rem;
+    color: #64748b;
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid rgba(99,102,241,0.15);
+    border-left: 3px solid #6366f1;
+    line-height: 1.8;
+    margin-top: 0.8rem;
+  }
+  .log-main  { color: #67e8f9; }
+  .log-docs  { color: #a78bfa; }
+  .log-repo  { color: #34d399; }
+  .log-web   { color: #fbbf24; }
+  .log-sys   { color: #475569; font-style: italic; }
+
+  /* ── Output ── */
+  .output-title-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 1.5rem 0 0.8rem;
+    padding-bottom: 0.8rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .output-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #e2e8f0;
+  }
+
+  /* ── Architecture ── */
+  .arch-node {
+    background: rgba(99,102,241,0.1);
+    border: 1px solid rgba(99,102,241,0.3);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    text-align: center;
+    color: #c7d2fe;
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+  .arch-arrow-down {
+    text-align: center;
+    color: #312e81;
+    font-size: 1.3rem;
+    margin: 0.2rem 0;
+    line-height: 1;
+  }
+  .arch-subagents {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 0.25rem 0;
+  }
+  .arch-sub {
+    flex: 1;
+    background: rgba(139,92,246,0.08);
+    border: 1px solid rgba(139,92,246,0.22);
+    border-radius: 10px;
+    padding: 0.65rem 0.5rem;
+    text-align: center;
+    color: #ddd6fe;
+    font-size: 0.78rem;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  .arch-mcp {
+    background: rgba(6,182,212,0.08);
+    border: 1px solid rgba(6,182,212,0.22);
+    border-radius: 10px;
+    padding: 0.65rem 1rem;
+    text-align: center;
+    color: #a5f3fc;
+    font-size: 0.82rem;
+    font-weight: 500;
+  }
+
+  /* ── Step Cards ── */
+  .step-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.055);
+    border-radius: 11px;
+    padding: 0.9rem 1rem;
+    margin-bottom: 0.65rem;
+    transition: border-color 0.2s;
+  }
+  .step-card:hover { border-color: rgba(99,102,241,0.35); }
+  .step-num {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: white;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 0.75rem; flex-shrink: 0;
+  }
+  .step-body h4 { margin: 0 0 0.15rem; color: #e2e8f0; font-size: 0.87rem; font-weight: 600; }
+  .step-body p  { margin: 0; color: #64748b; font-size: 0.78rem; line-height: 1.5; }
+
+  /* ── Tech Table ── */
+  .tech-table { width: 100%; border-collapse: collapse; border-radius: 10px; overflow:hidden; }
+  .tech-table th {
+    background: rgba(99,102,241,0.18);
+    color: #a5b4fc;
+    padding: 9px 14px;
+    text-align: left;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid rgba(99,102,241,0.2);
+  }
+  .tech-table td {
+    padding: 9px 14px;
+    color: #cbd5e1;
+    font-size: 0.82rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+  .tech-table tr:last-child td { border-bottom: none; }
+  .tech-table tr:hover td { background: rgba(99,102,241,0.04); }
+
+  /* ── Skill Card ── */
+  .skill-card {
+    background: linear-gradient(135deg, rgba(99,102,241,0.07), rgba(139,92,246,0.04));
+    border: 1px solid rgba(99,102,241,0.18);
+    border-radius: 14px;
+    padding: 1.3rem 1.5rem;
+    margin-bottom: 0.8rem;
+  }
+  .skill-name {
+    font-size: 1.2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #818cf8, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.35rem;
+  }
+  .skill-desc { color: #64748b; font-size: 0.8rem; margin-bottom: 0.9rem; line-height: 1.5; }
+  .phase-pill {
+    display: inline-block;
+    background: rgba(99,102,241,0.13);
+    border: 1px solid rgba(99,102,241,0.22);
+    color: #a5b4fc;
+    border-radius: 100px;
+    padding: 3px 11px;
+    font-size: 0.71rem;
+    font-weight: 600;
+    margin-right: 5px;
+    margin-bottom: 4px;
+  }
+
+  /* ── Profile Card ── */
+  .profile-card {
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 13px;
+    padding: 1.1rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .profile-icon { font-size: 1.7rem; margin-bottom: 0.3rem; }
+  .profile-name { font-size: 0.92rem; font-weight: 700; color: #e2e8f0; margin-bottom: 0.15rem; }
+  .profile-role { font-size: 0.73rem; color: #475569; margin-bottom: 0.6rem; }
+  .profile-desc { font-size: 0.78rem; color: #64748b; line-height: 1.55; margin-bottom: 0.65rem; }
+  .tool-tag {
+    display: inline-block;
+    background: rgba(16,185,129,0.1);
+    border: 1px solid rgba(16,185,129,0.18);
+    color: #6ee7b7;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    margin: 2px;
+  }
+
+  /* ── Glass Card ── */
+  .glass-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 13px;
+    padding: 1.2rem 1.4rem;
+  }
+
+  /* ── Sidebar ── */
+  .status-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; font-size: 0.8rem;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green { background: #10b981; box-shadow: 0 0 5px #10b981; }
+  .dot-amber { background: #f59e0b; box-shadow: 0 0 5px #f59e0b; }
+  .dot-blue  { background: #06b6d4; box-shadow: 0 0 5px #06b6d4; }
+  .dot-gray  { background: #374151; }
+  .sa-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 9px;
+    padding: 8px 11px;
+    margin-bottom: 6px;
+  }
+  .sa-name { font-size: 0.79rem; font-weight: 700; color: #e2e8f0; }
+  .sa-role { font-size: 0.7rem;  color: #475569; }
 </style>
 """, unsafe_allow_html=True)
 
-# Application Header
-st.markdown('<div class="main-title">🤖 Agent Skills Orchestrator</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">A multi-agent research framework powered by Google ADK & Gemini 2.5 Flash</div>', unsafe_allow_html=True)
 
-# ----------------- SIDEBAR -----------------
-st.sidebar.markdown("## ⚙️ Configuration")
+# ── Hero Header ───────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="hero-wrapper">
+  <span class="hero-icon">🤖</span>
+  <div class="hero-title">Agent Skills</div>
+  <div class="hero-subtitle">Multi-Agent Research System &nbsp;·&nbsp; Google ADK &times; Gemini 2.5 Flash</div>
+  <hr class="hero-divider">
+</div>
+""", unsafe_allow_html=True)
 
-# Get credentials from .env
-env_gemini_key = os.environ.get("GEMINI_API_KEY", "")
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+env_gemini_key   = os.environ.get("GEMINI_API_KEY", "")
 env_notion_token = os.environ.get("NOTION_TOKEN", "")
 
-# Allow dynamic overrides in the UI
-gemini_key = st.sidebar.text_input(
-    "Google Gemini API Key",
-    value=env_gemini_key,
-    type="password",
-    help="Google AI Studio API Key. If left empty, the app will fail to run."
-)
+with st.sidebar:
+    st.markdown("## ⚙️ Configuration")
+    gemini_key = st.text_input(
+        "Google Gemini API Key", value=env_gemini_key, type="password",
+        help="Google AI Studio API Key. Required to run the orchestrator.",
+    )
+    notion_token = st.text_input(
+        "Notion Integration Token", value=env_notion_token, type="password",
+        help="Notion internal integration secret. Optional.",
+    )
+    notion_page_id = st.text_input(
+        "Notion Parent Page ID (optional)", placeholder="e.g. 1a2b3c4d5e...",
+        help="Supply a Notion page ID to save the output there.",
+    )
 
-notion_token = st.sidebar.text_input(
-    "Notion Integration Secret (Token)",
-    value=env_notion_token,
-    type="password",
-    help="Notion Integration Token to write results back to Notion."
-)
+    st.divider()
+    st.markdown("### 🚦 System Status")
+    g_dot   = "dot-green" if gemini_key   else "dot-amber"
+    g_col   = "#6ee7b7"   if gemini_key   else "#fcd34d"
+    g_lbl   = "Gemini API: Loaded"    if gemini_key   else "Gemini API: Missing"
+    n_dot   = "dot-blue"  if notion_token else "dot-gray"
+    n_col   = "#a5f3fc"   if notion_token else "#374151"
+    n_lbl   = "Notion MCP: Connected" if notion_token else "Notion MCP: Offline"
+    st.markdown(f"""
+    <div class="status-row">
+      <div class="dot {g_dot}"></div>
+      <span style="color:{g_col}; font-weight:600;">{g_lbl}</span>
+    </div>
+    <div class="status-row">
+      <div class="dot {n_dot}"></div>
+      <span style="color:{n_col}; font-weight:600;">{n_lbl}</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-notion_page_id = st.sidebar.text_input(
-    "Notion Parent Page ID (Optional)",
-    value="",
-    placeholder="e.g. 1a2b3c4d5e...",
-    help="Optional parent page ID to guide Notion page creation."
-)
+    st.divider()
+    st.markdown("### 🤖 Active Subagents")
+    for icon, name, role in [
+        ("🌐", "docs_researcher", "Official Documentation"),
+        ("💻", "repo_analyzer",   "GitHub Repositories"),
+        ("💬", "web_researcher",  "Web & Community"),
+    ]:
+        st.markdown(f"""
+        <div class="sa-card">
+          <div class="sa-name">{icon} {name}</div>
+          <div class="sa-role">{role}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-st.sidebar.divider()
-st.sidebar.markdown("### 🚦 Integration Status")
+    st.divider()
+    _skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
+    _skill_count = (
+        len([d for d in os.listdir(_skills_dir) if os.path.isdir(os.path.join(_skills_dir, d))])
+        if os.path.isdir(_skills_dir) else 0
+    )
+    st.markdown(f"""
+    <div style="text-align:center; padding:8px; background:rgba(99,102,241,0.09);
+         border:1px solid rgba(99,102,241,0.18); border-radius:9px;
+         color:#a5b4fc; font-size:0.82rem; font-weight:700;">
+      📚 {_skill_count} Skill{'s' if _skill_count != 1 else ''} Loaded
+    </div>
+    """, unsafe_allow_html=True)
 
-if gemini_key:
-    st.sidebar.success("Gemini API Key: Loaded")
-else:
-    st.sidebar.warning("Gemini API Key: Missing")
 
-if notion_token:
-    st.sidebar.info("Notion Integration: Connected")
-else:
-    st.sidebar.warning("Notion Integration: Offline (Local Only)")
+# ── Session State ─────────────────────────────────────────────────────────────
+_AGENT_NAMES = ["docs_researcher", "repo_analyzer", "web_researcher"]
+for _key, _default in [
+    ("log_messages", []),
+    ("final_report", ""),
+    ("agent_status", {a: "standby" for a in _AGENT_NAMES}),
+    ("agent_logs",   {a: [] for a in _AGENT_NAMES}),
+    ("run_phase", 0),
+    ("query_ran", ""),
+]:
+    if _key not in st.session_state:
+        st.session_state[_key] = _default
 
-st.sidebar.divider()
-st.sidebar.markdown("### 👥 Active Subagents")
-st.sidebar.markdown("- 🌐 **docs_researcher** (Documentation)")
-st.sidebar.markdown("- 💻 **repo_analyzer** (Code / Repository)")
-st.sidebar.markdown("- 💬 **web_researcher** (Community / Web)")
 
-# ----------------- MAIN VIEW -----------------
+# ── Tab Layout ────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["🔬  Research Console", "🏗️  Architecture", "📖  About & Skills"])
 
-# Display active skills loaded from directories
-skills_context = load_skills()
-with st.expander("🎓 Active Skills Extracted at Startup"):
-    if skills_context:
-        st.markdown(skills_context)
-    else:
-        st.info("No custom skills discovered in skills/ folder.")
 
-# Query input
-user_query = st.text_area(
-    "What programming tool, framework, or library would you like to learn or research?",
-    value="Learn FastAPI",
-    height=70,
-    help="Try queries like 'Learn FastAPI' or 'Get started with Streamlit' to trigger specific skills."
-)
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — Research Console
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab1:
 
-execute_btn = st.button("🚀 Start Orchestrator", use_container_width=True)
+    # ── Query Input ───────────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    user_query = st.text_area(
+        label="Research Query",
+        value="Learn FastAPI",
+        height=82,
+        placeholder="e.g.  Learn FastAPI  ·  Get started with Redis  ·  Help me understand LangChain",
+        help="Queries starting with 'Learn' or 'Get started with' trigger the learning-a-tool skill.",
+    )
+    save_to_notion = st.checkbox(
+        "💾  Save synthesized output to Notion",
+        value=False,
+        help="Automatically save the complete 5-level learning path to Notion once the research is completed.",
+    )
+    execute_btn = st.button("🚀  Start Orchestrator", use_container_width=True, type="primary")
 
-# Event logging display list
-if "log_messages" not in st.session_state:
-    st.session_state.log_messages = []
-if "final_report" not in st.session_state:
-    st.session_state.final_report = ""
+    # ── Phase Progress Bar ────────────────────────────────────────────────────
+    _phase_labels = ["Phase 1: Research", "Phase 2: Structure", "Phase 3: Output"]
 
-async def execute_orchestrator(query, g_key, n_token, n_page_id, status_container, status_box, report_box):
-    st.session_state.log_messages = []
-    st.session_state.final_report = ""
-    
-    # Temporarily set environment key for Google ADK client
-    os.environ["GEMINI_API_KEY"] = g_key
-    
-    # 1. Base instructions and loaded skills compilation
-    base_prompt = load_prompt("main_agent.md")
-    skills_context = load_skills()
-    main_agent_prompt = base_prompt
-    if skills_context:
-        main_agent_prompt += "\n\n" + skills_context
-        
-    prompts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
-    subagents = create_subagents(prompts_dir)
-    
-    # 2. Notion MCP Server lifecycle management
-    notion_toolset = None
-    if n_token:
-        status_box.write("🔌 Booting Notion MCP Server...")
-        try:
-            notion_toolset = McpToolset(
-                connection_params=StdioConnectionParams(
-                    server_params=StdioServerParameters(
-                        command="npx",
-                        args=["-y", "@notionhq/notion-mcp-server"],
-                        env={
-                            "OPENAPI_MCP_HEADERS": (
-                                f'{{"Authorization": "Bearer {n_token}", '
-                                f'"Notion-Version": "2022-06-28"}}'
-                            )
-                        },
-                    ),
-                    timeout=60.0,
+    def _render_phase_bar(active: int) -> str:
+        parts = []
+        for i, lbl in enumerate(_phase_labels, 1):
+            if i < active:
+                cls, icon = "phase-done", "✅"
+            elif i == active:
+                cls, icon = "phase-active", "⟳"
+            else:
+                cls, icon = "phase-inactive", ""
+            parts.append(f'<div class="phase-step {cls}">{icon} {lbl}</div>')
+            if i < 3:
+                parts.append('<div class="phase-arrow">›</div>')
+        return f'<div class="phase-bar">{"".join(parts)}</div>'
+
+    phase_slot = st.empty()
+    if st.session_state.run_phase > 0:
+        phase_slot.markdown(_render_phase_bar(st.session_state.run_phase), unsafe_allow_html=True)
+
+    # ── Agent Cards ───────────────────────────────────────────────────────────
+    _agent_meta = {
+        "docs_researcher": ("🌐", "Official Documentation"),
+        "repo_analyzer":   ("💻", "GitHub Repositories"),
+        "web_researcher":  ("💬", "Web & Community"),
+    }
+
+    def _card_html(name: str) -> str:
+        icon, role    = _agent_meta[name]
+        status        = st.session_state.agent_status[name]
+        logs          = st.session_state.agent_logs[name]
+        last_log      = logs[-1] if logs else ""
+        badge_cls     = f"badge-{status}"
+        badge_txt     = {"standby": "● Standby", "running": "⟳ Active", "done": "✅ Done"}[status]
+        log_html      = f'<div class="agent-log-preview">🔧 {last_log}</div>' if last_log else ""
+        return f"""
+        <div class="agent-card agent-card-{status}">
+          <div class="agent-name">{icon} {name}</div>
+          <div class="agent-role">{role}</div>
+          <span class="badge {badge_cls}">{badge_txt}</span>
+          {log_html}
+        </div>"""
+
+    _col1, _col2, _col3 = st.columns(3)
+    _card_slots = {
+        "docs_researcher": _col1.empty(),
+        "repo_analyzer":   _col2.empty(),
+        "web_researcher":  _col3.empty(),
+    }
+
+    def _refresh_cards():
+        for name, slot in _card_slots.items():
+            slot.markdown(_card_html(name), unsafe_allow_html=True)
+
+    _refresh_cards()
+
+    # ── Log ───────────────────────────────────────────────────────────────────
+    _log_slot = st.empty()
+
+    def _refresh_log():
+        if not st.session_state.log_messages:
+            return
+        lines = []
+        for msg in st.session_state.log_messages[-50:]:
+            if "[Main]" in msg:
+                lines.append(f'<span class="log-main">{msg}</span>')
+            elif "docs_researcher" in msg:
+                lines.append(f'<span class="log-docs">{msg}</span>')
+            elif "repo_analyzer" in msg:
+                lines.append(f'<span class="log-repo">{msg}</span>')
+            elif "web_researcher" in msg:
+                lines.append(f'<span class="log-web">{msg}</span>')
+            else:
+                lines.append(f'<span class="log-sys">{msg}</span>')
+        _log_slot.markdown(
+            f'<div class="terminal-log">{"<br>".join(lines)}</div>',
+            unsafe_allow_html=True,
+        )
+
+    if st.session_state.log_messages:
+        _refresh_log()
+
+    # ── Output Renderer ───────────────────────────────────────────────────────
+    def _render_output():
+        report = st.session_state.final_report
+        if not report:
+            return
+        label = st.session_state.query_ran or "Learning Path"
+
+        st.markdown(f"""
+        <div class="output-title-bar">
+          <div class="output-title">📝 {label}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.download_button(
+            label="⬇️  Download as Markdown",
+            data=report,
+            file_name=f"{label.replace(' ', '_').lower()}.md",
+            mime="text/markdown",
+        )
+
+        # Split on Level headers for structured display
+        level_splits = re.compile(r'(?=#{1,3}\s*Level\s*\d)', re.IGNORECASE)
+        sections = level_splits.split(report)
+
+        if len(sections) > 1:
+            preamble = sections[0].strip()
+            if preamble:
+                with st.expander("📋 Overview", expanded=True):
+                    st.markdown(preamble)
+            for sec in sections[1:]:
+                first_line = sec.strip().split("\n")[0]
+                title = first_line.lstrip("#").strip()
+                with st.expander(f"📌 {title}", expanded=False):
+                    st.markdown(sec.strip())
+        else:
+            st.markdown(report)
+
+        with st.expander("📜 Raw Agent Traces"):
+            st.code("\n".join(st.session_state.log_messages), language=None)
+
+    _output_slot = st.empty()
+
+    # ── Async Orchestrator ────────────────────────────────────────────────────
+    async def _run_orchestrator(query: str, g_key: str, n_token: str, n_page_id: str, save_to_notion: bool):
+        # Reset
+        st.session_state.log_messages  = []
+        st.session_state.final_report  = ""
+        st.session_state.agent_status  = {a: "standby" for a in _AGENT_NAMES}
+        st.session_state.agent_logs    = {a: [] for a in _AGENT_NAMES}
+        st.session_state.run_phase     = 1
+        st.session_state.query_ran     = query
+
+        os.environ["GEMINI_API_KEY"] = g_key
+
+        # Build prompt
+        base_prompt     = load_prompt("main_agent.md")
+        skills_context  = load_skills()
+        full_prompt     = base_prompt + ("\n\n" + skills_context if skills_context else "")
+
+        prompts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+        subagents   = create_subagents(prompts_dir)
+
+        # Notion MCP (optional)
+        notion_toolset = None
+        if n_token:
+            st.session_state.log_messages.append("🔌 Connecting to Notion MCP Server...")
+            _refresh_log()
+            try:
+                notion_toolset = UnderscoreMcpToolset(
+                    connection_params=StdioConnectionParams(
+                        server_params=StdioServerParameters(
+                            command="npx",
+                            args=["-y", "@notionhq/notion-mcp-server"],
+                            env={
+                                "OPENAPI_MCP_HEADERS": (
+                                    f'{{"Authorization": "Bearer {n_token}", '
+                                    f'"Notion-Version": "2022-06-28"}}'
+                                )
+                            },
+                        ),
+                        timeout=60.0,
+                    )
                 )
-            )
-            status_box.write("✅ Notion MCP Server connected successfully.")
-        except Exception as e:
-            status_box.write(f"⚠️ Warning: Notion MCP initialization failed: {e}")
-            
-    # Assemble orchestrator agent
-    orchestrator = LlmAgent(
-        name="orchestrator",
-        model="gemini-2.5-flash",
-        description="Research orchestrator that delegates tasks to specialized subagents.",
-        instruction=main_agent_prompt,
-        sub_agents=subagents,
-        tools=[notion_toolset] if notion_toolset else [],
-    )
-    
-    session_service = InMemorySessionService()
-    session_id = str(uuid.uuid4())
-    
-    runner = Runner(
-        agent=orchestrator,
-        app_name="streamlit_skills",
-        session_service=session_service,
-    )
-    
-    await session_service.create_session(
-        app_name="streamlit_skills",
-        user_id="streamlit_user",
-        session_id=session_id,
-    )
-    
-    # Adjust query with Notion page if provided
-    modified_query = query
-    if n_page_id and n_token:
-        modified_query += f" and save the learning path to Notion page '{n_page_id}'"
-        
-    content = types.Content(
-        role="user",
-        parts=[types.Part(text=modified_query)]
-    )
-    
-    status_box.write("🚀 Running Orchestration...")
-    
-    # Listen to asynchronous streaming events
-    try:
-        async for event in runner.run_async(
+                st.session_state.log_messages.append("✅ Notion MCP connected.")
+                _refresh_log()
+            except Exception as exc:
+                st.session_state.log_messages.append(f"⚠️ Notion MCP failed: {exc}")
+                _refresh_log()
+
+        # Orchestrator
+        orchestrator = LlmAgent(
+            name="orchestrator",
+            model="gemini-2.5-flash",
+            description="Research orchestrator that delegates tasks to specialized subagents.",
+            instruction=full_prompt,
+            sub_agents=subagents,
+            tools=[notion_toolset] if notion_toolset else [],
+        )
+
+        session_service = InMemorySessionService()
+        session_id = str(uuid.uuid4())
+        runner = Runner(
+            agent=orchestrator,
+            app_name="streamlit_skills",
+            session_service=session_service,
+        )
+        await session_service.create_session(
+            app_name="streamlit_skills",
             user_id="streamlit_user",
             session_id=session_id,
-            new_message=content,
-        ):
-            author = getattr(event, "author", "unknown")
-            label = "[Main]" if author == "orchestrator" else f"[{author}]"
-            
-            # Show tool calls
-            if hasattr(event, "get_function_calls"):
-                for fc in event.get_function_calls():
-                    msg = f"🔧 {label} tool call: {fc.name}({fc.args})"
-                    st.session_state.log_messages.append(msg)
-                    status_container.markdown(
-                        f'<div class="status-log">{"<br>".join(st.session_state.log_messages)}</div>', 
-                        unsafe_allow_html=True
-                    )
-            
-            # Show final report
-            if event.is_final_response():
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, "text") and part.text:
-                            st.session_state.final_report += part.text
-                            report_box.markdown(st.session_state.final_report)
-                            
-            # Show intermediate updates
-            elif event.content and event.content.parts:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text and part.text.strip():
-                        # Truncate long lines for log preview
-                        preview = part.text.strip()[:100] + "..." if len(part.text.strip()) > 100 else part.text.strip()
-                        msg = f"💭 {label}: {preview}"
-                        st.session_state.log_messages.append(msg)
-                        status_container.markdown(
-                            f'<div class="status-log">{"<br>".join(st.session_state.log_messages)}</div>', 
-                            unsafe_allow_html=True
-                        )
-    except Exception as e:
-        st.error(f"Execution Error: {e}")
-        status_box.write(f"❌ Execution failed: {e}")
-    finally:
-        if notion_toolset:
-            status_box.write("🔌 Terminating Notion MCP Server Connection...")
-            await notion_toolset.close()
-            status_box.write("✅ Terminated Notion connection.")
-
-# Button click handler
-if execute_btn:
-    if not gemini_key:
-        st.error("Please provide a valid Google Gemini API Key in the sidebar config panel.")
-    else:
-        # Containers for streaming updates
-        st.subheader("🕵️ Orchestration Status & Traces")
-        status_box = st.empty()
-        status_container = st.empty()
-        
-        st.subheader("📝 Synthesized Output")
-        report_box = st.empty()
-        
-        # Streamlit runner entry-point for async function
-        asyncio.run(execute_orchestrator(
-            user_query,
-            gemini_key,
-            notion_token,
-            notion_page_id,
-            status_container,
-            status_box,
-            report_box
-        ))
-        
-        # Mark as complete
-        status_box.write("✨ **Orchestration Complete!** View the synthesized output below.")
-
-# If query was already run and stored in state, show it
-elif st.session_state.final_report:
-    st.subheader("📝 Synthesized Output")
-    st.markdown(st.session_state.final_report)
-    
-    with st.expander("📜 View Raw Agent Traces from Last Run"):
-        st.markdown(
-            f'<div class="status-log">{"<br>".join(st.session_state.log_messages)}</div>', 
-            unsafe_allow_html=True
         )
+
+        # Keep query clean to prevent subagent prompt confusion
+        modified_query = query
+
+
+        content = types.Content(role="user", parts=[types.Part(text=modified_query)])
+
+        st.session_state.log_messages.append("🚀 Orchestrator started — delegating to subagents...")
+        _refresh_log()
+        phase_slot.markdown(_render_phase_bar(1), unsafe_allow_html=True)
+        _refresh_cards()
+
+        try:
+            async for event in runner.run_async(
+                user_id="streamlit_user",
+                session_id=session_id,
+                new_message=content,
+            ):
+                author = getattr(event, "author", "unknown")
+                label  = "[Main]" if author == "orchestrator" else f"[{author}]"
+
+                # Wake up sleeping agent cards
+                if author in st.session_state.agent_status:
+                    if st.session_state.agent_status[author] == "standby":
+                        st.session_state.agent_status[author] = "running"
+
+                # Tool calls
+                if hasattr(event, "get_function_calls"):
+                    for fc in event.get_function_calls():
+                        args_str = str(fc.args)
+                        args_preview = args_str[:60] + "..." if len(args_str) > 60 else args_str
+                        msg = f"🔧 {label} → {fc.name}({args_preview})"
+                        st.session_state.log_messages.append(msg)
+                        if author in st.session_state.agent_logs:
+                            st.session_state.agent_logs[author].append(
+                                f"{fc.name}({args_preview})"
+                            )
+                        _refresh_cards()
+                        _refresh_log()
+
+                # Final response
+                if event.is_final_response():
+                    if author in st.session_state.agent_status:
+                        st.session_state.agent_status[author] = "done"
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                st.session_state.final_report += part.text
+                    st.session_state.run_phase = 3
+                    phase_slot.markdown(_render_phase_bar(3), unsafe_allow_html=True)
+                    _refresh_cards()
+
+                # Intermediate text
+                elif event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text and part.text.strip():
+                            preview = part.text.strip()
+                            preview = preview[:130] + "..." if len(preview) > 130 else preview
+                            st.session_state.log_messages.append(f"💭 {label}: {preview}")
+                    if st.session_state.run_phase < 2:
+                        st.session_state.run_phase = 2
+                        phase_slot.markdown(_render_phase_bar(2), unsafe_allow_html=True)
+                    _refresh_log()
+
+            # Save the synthesized report to Notion if requested
+            if save_to_notion and st.session_state.final_report:
+                st.session_state.log_messages.append("📝 Saving final report to Notion...")
+                _refresh_log()
+                try:
+                    clean_id = n_page_id.strip()
+                    if len(clean_id) == 32:
+                        clean_id = f"{clean_id[:8]}-{clean_id[8:12]}-{clean_id[12:16]}-{clean_id[16:20]}-{clean_id[20:]}"
+                    
+                    if notion_toolset:
+                        st.session_state.log_messages.append(f"🔧 [Main] → API_post_page(parent={{'page_id': '{clean_id}'}}, title='Learning Path: {query}')")
+                        _refresh_log()
+                        
+                        import json
+                        post_result = await notion_toolset._execute_with_session(
+                            lambda session: session.call_tool(
+                                name="API-post-page",
+                                arguments={
+                                    "parent": {"page_id": clean_id},
+                                    "properties": {
+                                        "title": [
+                                            {
+                                                "type": "text",
+                                                "text": {"content": f"Learning Path: {query}"}
+                                            }
+                                        ]
+                                    }
+                                }
+                            ),
+                            "Failed to call API-post-page"
+                        )
+                        
+                        resp_obj = json.loads(post_result.content[0].text)
+                        new_page_id = resp_obj["id"]
+                        
+                        st.session_state.log_messages.append(f"🔧 [Main] → API_update_page_markdown(page_id='{new_page_id}', replace_content=...)")
+                        _refresh_log()
+                        
+                        await notion_toolset._execute_with_session(
+                            lambda session: session.call_tool(
+                                name="API-update-page-markdown",
+                                arguments={
+                                    "page_id": new_page_id,
+                                    "type": "replace_content",
+                                    "replace_content": {
+                                        "new_str": st.session_state.final_report
+                                    }
+                                }
+                            ),
+                            "Failed to call API-update-page-markdown"
+                        )
+                        st.session_state.log_messages.append("✅ Successfully saved to Notion!")
+                        _refresh_log()
+                except Exception as notion_exc:
+                    st.session_state.log_messages.append(f"⚠️ Failed to save to Notion: {notion_exc}")
+                    _refresh_log()
+
+        except Exception as exc:
+            st.error(f"Execution error: {exc}")
+            st.session_state.log_messages.append(f"❌ Error: {exc}")
+            _refresh_log()
+        finally:
+            for k in st.session_state.agent_status:
+                if st.session_state.agent_status[k] == "running":
+                    st.session_state.agent_status[k] = "done"
+            _refresh_cards()
+            if notion_toolset:
+                await notion_toolset.close()
+                st.session_state.log_messages.append("🔌 Notion MCP connection closed.")
+                _refresh_log()
+
+    # ── Button Handler ────────────────────────────────────────────────────────
+    if execute_btn:
+        if not gemini_key:
+            st.error("⚠️ Please add your Google Gemini API Key in the sidebar before running.")
+        elif save_to_notion and (not notion_token or not notion_page_id):
+            st.error("⚠️ To save to Notion, please provide both your 'Notion Integration Token' and 'Notion Parent Page ID' in the sidebar.")
+        else:
+            asyncio.run(_run_orchestrator(user_query, gemini_key, notion_token, notion_page_id, save_to_notion))
+            st.success("✨ Orchestration complete! Scroll down to view the synthesized output.")
+            _render_output()
+    elif st.session_state.final_report:
+        _render_output()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — Architecture
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_diag, col_steps = st.columns([1, 1], gap="large")
+
+    with col_diag:
+        st.markdown("#### 🗺️ System Flow")
+        st.markdown("""
+        <div style="max-width:360px; margin:auto;">
+          <div class="arch-node">👤 User Input</div>
+          <div class="arch-arrow-down">↓</div>
+          <div class="arch-node" style="background:rgba(99,102,241,0.18); border-color:rgba(99,102,241,0.5);">
+            🧠 <strong>Orchestrator</strong><br>
+            <span style="font-size:0.73rem; opacity:0.65;">gemini-2.5-flash &nbsp;·&nbsp; reads skills/ at startup</span>
+          </div>
+          <div class="arch-arrow-down">↓&nbsp; delegates per skill workflow</div>
+          <div class="arch-subagents">
+            <div class="arch-sub">🌐<br><b>docs_researcher</b><br><span style="font-size:0.68rem;opacity:0.6">Official Docs</span></div>
+            <div class="arch-sub">💻<br><b>repo_analyzer</b><br><span style="font-size:0.68rem;opacity:0.6">GitHub Repos</span></div>
+            <div class="arch-sub">💬<br><b>web_researcher</b><br><span style="font-size:0.68rem;opacity:0.6">Web / Community</span></div>
+          </div>
+          <div class="arch-arrow-down">↓&nbsp; synthesize + structure</div>
+          <div class="arch-node">📝 Structured Final Output</div>
+          <div class="arch-arrow-down">↓&nbsp; (optional)</div>
+          <div class="arch-mcp">
+            🔌 <strong>Notion MCP Server</strong><br>
+            <span style="font-size:0.72rem; opacity:0.65;">npx &nbsp;·&nbsp; stdio protocol &nbsp;·&nbsp; page creation</span>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_steps:
+        st.markdown("#### ⚙️ How Skills Work")
+        for i, (title, desc) in enumerate([
+            ("Startup Discovery",
+             "load_skills() scans every skills/*/SKILL.md in the skills/ directory."),
+            ("Prompt Injection",
+             "SKILL.md contents are appended directly into the orchestrator's system prompt context."),
+            ("Query Matching",
+             "Orchestrator reads the skill's 'description' field to decide if a query triggers it."),
+            ("Phase Delegation",
+             "Orchestrator follows the skill's 3-phase workflow — each research source maps to a subagent."),
+            ("Parallel Research",
+             "Subagents run independently with google_search. They cannot talk to each other — only return to orchestrator."),
+            ("Synthesis & Output",
+             "Orchestrator deduplicates, resolves conflicts (official > community), structures final output."),
+        ], 1):
+            st.markdown(f"""
+            <div class="step-card">
+              <div class="step-num">{i}</div>
+              <div class="step-body">
+                <h4>{title}</h4>
+                <p>{desc}</p>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("#### ⚡ Tech Stack")
+    st.markdown("""
+    <table class="tech-table">
+      <thead>
+        <tr><th>Component</th><th>Technology</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Agent Framework</td>
+          <td><strong>Google ADK</strong></td>
+          <td>Agent orchestration, tool routing, async event streaming</td>
+        </tr>
+        <tr>
+          <td>LLM</td>
+          <td><strong>Gemini 2.5 Flash</strong></td>
+          <td>All agents share this model — fast, capable, free-tier friendly</td>
+        </tr>
+        <tr>
+          <td>Search</td>
+          <td><strong>google_search (built-in)</strong></td>
+          <td>Grounded web search integrated natively into ADK</td>
+        </tr>
+        <tr>
+          <td>MCP Server</td>
+          <td><strong>@notionhq/notion-mcp-server</strong></td>
+          <td>Notion page creation via Model Context Protocol over stdio</td>
+        </tr>
+        <tr>
+          <td>UI</td>
+          <td><strong>Streamlit</strong></td>
+          <td>Interactive web interface with live async streaming</td>
+        </tr>
+        <tr>
+          <td>Config</td>
+          <td><strong>python-dotenv</strong></td>
+          <td>API key management via .env file</td>
+        </tr>
+        <tr>
+          <td>Runtime</td>
+          <td><strong>Python 3.11+ · venv · pip</strong></td>
+          <td>Standard Python tooling</td>
+        </tr>
+      </tbody>
+    </table>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.info(
+        "**Key technical constraint**: ADK's `google_search` is a *built-in grounding tool*. "
+        "Gemini's API disallows mixing it with function-call tools (`transfer_to_agent`) in the same "
+        "request. Fix applied: `google_search.bypass_multi_tools_limit = True` + "
+        "`disallow_transfer_to_parent=True` on every subagent."
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — About & Skills
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_skills, col_agents = st.columns([1, 1], gap="large")
+
+    # ── Skills Explorer ───────────────────────────────────────────────────────
+    with col_skills:
+        st.markdown("### 📚 Skills Explorer")
+        st.markdown(
+            "<p style='font-size:0.82rem; color:#475569; margin-bottom:1rem;'>"
+            "Skills are plug-in workflow definitions in Markdown. "
+            "The orchestrator auto-discovers them at startup — no code changes needed.</p>",
+            unsafe_allow_html=True,
+        )
+
+        skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
+        if os.path.isdir(skills_dir):
+            skill_dirs = sorted(os.listdir(skills_dir))
+            found = False
+            for skill_dir in skill_dirs:
+                skill_path = os.path.join(skills_dir, skill_dir, "SKILL.md")
+                if not os.path.isfile(skill_path):
+                    continue
+                found = True
+                with open(skill_path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+
+                fm         = re.search(r"^---\n(.*?)\n---", raw, re.DOTALL)
+                nm_match   = re.search(r"^name:\s*(.+)$", fm.group(1), re.MULTILINE) if fm else None
+                desc_match = re.search(r"^description:\s*(.+)$", fm.group(1), re.MULTILINE) if fm else None
+                s_name     = nm_match.group(1).strip() if nm_match else skill_dir
+                s_desc     = desc_match.group(1).strip() if desc_match else ""
+
+                st.markdown(f"""
+                <div class="skill-card">
+                  <div class="skill-name">🎓 {s_name}</div>
+                  <div class="skill-desc">{s_desc}</div>
+                  <span class="phase-pill">Phase 1: Research</span>
+                  <span class="phase-pill">Phase 2: Structure</span>
+                  <span class="phase-pill">Phase 3: Output</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                with st.expander(f"📄 View full SKILL.md — {s_name}"):
+                    st.code(raw, language="markdown")
+
+            if not found:
+                st.info("No skills found in skills/ directory.")
+        else:
+            st.warning("skills/ directory not found.")
+
+        st.markdown("---")
+        st.markdown("#### ➕ Adding a New Skill")
+        st.code(
+            "skills/\n"
+            "└── my-new-skill/\n"
+            "    ├── SKILL.md       ← name, description, 3-phase workflow\n"
+            "    └── references/   ← optional supporting docs",
+            language=None,
+        )
+        st.markdown(
+            "<p style='font-size:0.8rem; color:#475569;'>"
+            "The orchestrator picks it up automatically on next startup. "
+            "Zero code changes required. See <code>CONTRIBUTING.md</code> for the full guide.</p>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Subagent Profiles ─────────────────────────────────────────────────────
+    with col_agents:
+        st.markdown("### 🤖 Subagent Profiles")
+
+        _prompts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+
+        _profiles = [
+            {
+                "icon": "🌐", "name": "docs_researcher", "color": "#a78bfa",
+                "role": "Official Documentation Specialist",
+                "desc": ("Finds and extracts information from official documentation — "
+                         "APIs, guides, changelogs, installation instructions, and known limitations."),
+                "tools": ["google_search"],
+                "prompt_file": "docs_researcher.md",
+            },
+            {
+                "icon": "💻", "name": "repo_analyzer", "color": "#34d399",
+                "role": "GitHub Repository Analyst",
+                "desc": ("Analyzes code repositories for project structure, examples, "
+                         "README content, stars, license, and architecture patterns."),
+                "tools": ["google_search"],
+                "prompt_file": "repo_analyzer.md",
+            },
+            {
+                "icon": "💬", "name": "web_researcher", "color": "#fbbf24",
+                "role": "Community & Web Curator",
+                "desc": ("Finds tutorials, video resources, comparison articles, "
+                         "community discussions, and real-world use cases from across the web."),
+                "tools": ["google_search"],
+                "prompt_file": "web_researcher.md",
+            },
+        ]
+
+        for p in _profiles:
+            tool_tags = "".join([f'<span class="tool-tag">🔧 {t}</span>' for t in p["tools"]])
+            st.markdown(f"""
+            <div class="profile-card" style="border-left: 3px solid {p['color']};">
+              <div class="profile-icon">{p['icon']}</div>
+              <div class="profile-name">{p['name']}</div>
+              <div class="profile-role">{p['role']}</div>
+              <div class="profile-desc">{p['desc']}</div>
+              {tool_tags}
+            </div>
+            """, unsafe_allow_html=True)
+
+            pf = os.path.join(_prompts_dir, p["prompt_file"])
+            if os.path.isfile(pf):
+                with open(pf, "r", encoding="utf-8") as f:
+                    prompt_raw = f.read()
+                with st.expander(f"📋 {p['name']} system prompt"):
+                    st.markdown(prompt_raw)
+
+        st.markdown("---")
+        st.markdown("#### 📦 Project Info")
+        st.markdown("""
+        <div class="glass-card">
+          <div style="font-size:0.82rem; color:#94a3b8; line-height:2;">
+            <b style="color:#e2e8f0;">Version</b> &nbsp; v0.1.0<br>
+            <b style="color:#e2e8f0;">Framework</b> &nbsp; Google ADK (Agent Development Kit)<br>
+            <b style="color:#e2e8f0;">Model</b> &nbsp; gemini-2.5-flash<br>
+            <b style="color:#e2e8f0;">GitHub</b> &nbsp;
+              <a href="https://github.com/Sushmender/agent-skills"
+                 style="color:#818cf8; text-decoration:none;">
+                Sushmender/agent-skills ↗
+              </a><br>
+            <b style="color:#e2e8f0;">License</b> &nbsp; MIT
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
