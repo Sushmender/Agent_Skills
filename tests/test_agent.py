@@ -6,6 +6,9 @@ to the three specialized subagents and produces a final response.
 
 Run: .venv\Scripts\python.exe tests/test_agent.py
 """
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import asyncio
 import os
 import sys

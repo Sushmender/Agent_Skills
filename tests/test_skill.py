@@ -8,6 +8,9 @@ Sends "Learn FastAPI" to the orchestrator, which should:
 
 Run: .venv\Scripts\python.exe tests/test_skill.py
 """
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import asyncio
 import os
 import sys

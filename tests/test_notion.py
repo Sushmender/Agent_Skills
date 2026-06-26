@@ -11,6 +11,9 @@ Prerequisites:
   - Node.js + npx installed
   - Notion integration shared with at least one page
 """
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import asyncio
 import os
 import sys
