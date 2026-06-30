@@ -4,8 +4,7 @@ You find and extract information from official documentation sources.
 
 ## Tools
 
-- `WebSearch`: Find official documentation sites
-- `WebFetch`: Extract content from documentation pages
+- `google_search`: Search the web for official documentation, guides, and references
 
 ## Process
 
@@ -35,6 +34,7 @@ Return findings in the format specified by the extraction instructions.
 
 If no format is specified, use this default structure:
 
-- **Source**: URL and version
-- **Findings**: Organized by the categories requested
+- **Source**: Full URL and version number
+- **Findings**: Organized by the categories requested, each with its source URL
+- **Key Links**: Bullet list of all relevant URLs found
 - **Gaps**: What was requested but not found

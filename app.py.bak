@@ -414,36 +414,6 @@ env_notion_token = os.environ.get("NOTION_TOKEN", "")
 gemini_key = env_gemini_key
 notion_token = env_notion_token
 
-@st.dialog("🤖 Agent Profile", width="large")
-def show_agent_profile(agent_name: str, icon: str, role: str):
-    st.markdown(f"### {icon} {agent_name}")
-    st.markdown(f"**Role:** {role}")
-    st.markdown("---")
-    prompts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
-    prompt_path = os.path.join(prompts_dir, f"{agent_name}.md")
-    if os.path.exists(prompt_path):
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            st.markdown(f.read())
-    else:
-        st.warning(f"Prompt file not found for {agent_name}")
-
-@st.dialog("📚 Loaded Skills", width="large")
-def show_skills_loaded():
-    st.markdown("### 📚 Loaded Skills")
-    st.markdown("Skills are plug-in workflow definitions in Markdown.")
-    st.markdown("---")
-    skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
-    if os.path.isdir(skills_dir):
-        for s_name in os.listdir(skills_dir):
-            s_dir = os.path.join(skills_dir, s_name)
-            if os.path.isdir(s_dir):
-                skill_file = os.path.join(s_dir, "SKILL.md")
-                if os.path.exists(skill_file):
-                    with open(skill_file, "r", encoding="utf-8") as f:
-                        st.markdown(f"**{s_name}**")
-                        with st.expander(f"View {s_name} SKILL.md"):
-                            st.code(f.read(), language="markdown")
-
 with st.sidebar:
     st.markdown("### 🚦 System Status")
     g_dot   = "dot-green" if gemini_key   else "dot-amber"
@@ -470,8 +440,12 @@ with st.sidebar:
         ("💻", "repo_analyzer",   "GitHub Repositories"),
         ("💬", "web_researcher",  "Web & Community"),
     ]:
-        if st.button(f"{icon} {name}", use_container_width=True):
-            show_agent_profile(name, icon, role)
+        st.markdown(f"""
+        <div class="sa-card">
+          <div class="sa-name">{icon} {name}</div>
+          <div class="sa-role">{role}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     st.divider()
     _skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
@@ -479,8 +453,13 @@ with st.sidebar:
         len([d for d in os.listdir(_skills_dir) if os.path.isdir(os.path.join(_skills_dir, d))])
         if os.path.isdir(_skills_dir) else 0
     )
-    if st.button(f"📚 {_skill_count} Skill{'s' if _skill_count != 1 else ''} Loaded", use_container_width=True, type="primary"):
-        show_skills_loaded()
+    st.markdown(f"""
+    <div style="text-align:center; padding:8px; background:rgba(99,102,241,0.09);
+         border:1px solid rgba(99,102,241,0.18); border-radius:9px;
+         color:#a5b4fc; font-size:0.82rem; font-weight:700;">
+      📚 {_skill_count} Skill{'s' if _skill_count != 1 else ''} Loaded
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ── Session State ─────────────────────────────────────────────────────────────
@@ -510,7 +489,7 @@ with tab1:
     st.markdown("<br>", unsafe_allow_html=True)
     user_query = st.text_area(
         label="Research Query",
-        value="",
+        value="Learn FastAPI",
         height=82,
         placeholder="e.g.  Learn FastAPI  ·  Get started with Redis  ·  Help me understand LangChain",
         help="Queries starting with 'Learn' or 'Get started with' trigger the learning-a-tool skill.",
@@ -528,7 +507,7 @@ with tab1:
         with col_notion:
             notion_page_id = st.text_input(
                 "Notion Parent Page ID",
-                placeholder="Enter notion page-ID",
+                placeholder="e.g. 38bfcf1c204e80229d95ec10f8d10391",
                 help="Supply a Notion parent page ID to save the output there.",
                 label_visibility="collapsed"
             )

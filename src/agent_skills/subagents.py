@@ -36,8 +36,10 @@ def create_subagents(prompts_dir: str) -> list[LlmAgent]:
         ),
         instruction=load_prompt(prompts_dir, "docs_researcher.md"),
         tools=[google_search],
-        # Prevent ADK from injecting transfer_to_agent function calls alongside
-        # google_search — Gemini API disallows mixing built-in + function tools.
+        # disallow_transfer_to_parent=True is REQUIRED:
+        # Gemini API rejects combining google_search (built-in tool) with
+        # transfer_to_parent (function tool) in the same request.
+        # Multi-turn orchestration in app.py handles sequencing instead.
         disallow_transfer_to_parent=True,
         disallow_transfer_to_peers=True,
     )
